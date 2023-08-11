@@ -51,7 +51,7 @@ class PeerOptions:
     token: str = None
     config: Any = field(default_factory=util.defaultConfig)
     secure: bool = False
-    pingInterval: int = 5  # ping to signaling server in seconds
+    heartbeatInterval: int = 5  # ping to signaling server in seconds
 
 
 class Peer(AsyncIOEventEmitter):
@@ -173,7 +173,7 @@ class Peer(AsyncIOEventEmitter):
             self._options.port,
             self._options.path,
             self._options.key,
-            self._options.pingInterval)
+            self._options.heartbeatInterval)
 
         @socket.on(SocketEventType.Message)
         async def on_message(data: ServerMessage):

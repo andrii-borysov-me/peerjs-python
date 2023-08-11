@@ -2,6 +2,7 @@
 import asyncio
 import json
 import logging
+import typing
 
 import websockets
 from pyee import AsyncIOEventEmitter
@@ -26,7 +27,7 @@ class Socket(AsyncIOEventEmitter):
         port: int = None,
         path: str = None,
         key: str = None,
-        pingInterval: int = 5000
+        heartbeat_interval: int = 5000
     ) -> None:
         """Create new wrapper around websocket."""
         super().__init__()
@@ -37,6 +38,9 @@ class Socket(AsyncIOEventEmitter):
         self._messagesQueue: list = []
         self._websocket: websockets.client.WebSocketClientProtocol = None
         self._receiver: asyncio.Task = None
+        # Task sending keepalive heartbeat.
+        self._keepalive_heartbeat_task: typing.Optional[asyncio.Task[None]] = None
+        self._heartbeat_interval = heartbeat_interval
 
     async def _connect(self, wss_url=None):
         """Connect to WebSockets server."""
@@ -45,9 +49,6 @@ class Socket(AsyncIOEventEmitter):
         websocket = await websockets.connect(wss_url, ping_interval=None)
         self._sendQueuedMessages()
         log.debug("WebSockets open")
-        await websocket.send(
-            json.dumps({"ping": "once"})
-        )
         self._disconnected = False
         return websocket
 
@@ -91,6 +92,7 @@ class Socket(AsyncIOEventEmitter):
         # it will end when the socket closes
         self._receiver = asyncio.create_task(
             self._receive())
+        self._keepalive_heartbeat_task = asyncio.create_task(self.keepalive_heartbeat())
 
     # Is the websocket currently open?
     def _wsOpen(self) -> bool:
@@ -105,6 +107,17 @@ class Socket(AsyncIOEventEmitter):
         self._messagesQueue = []
         for message in copiedQueue:
             self.send(message)
+
+    async def keepalive_heartbeat(self) -> None:
+        while self._wsOpen():
+            await asyncio.sleep(self._heartbeat_interval)
+
+            # if still not disconnected, enqueue 'heartbeat'
+            if self._wsOpen():
+                await self._websocket.send(
+                    json.dumps({ 'type': 'HEARTBEAT' })
+                )
+        return
 
     async def send(self, data: any) -> None:
         """Expose send for DC & Peer."""
@@ -145,3 +158,6 @@ class Socket(AsyncIOEventEmitter):
         if self._websocket:
             await self._websocket.close()
             self._websocket = None
+        if self._keepalive_heartbeat_task is not None:
+            self._keepalive_heartbeat_task.cancel()
+            self._keepalive_heartbeat_task = None
